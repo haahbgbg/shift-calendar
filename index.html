@@ -55,9 +55,10 @@ header{background:var(--tbg);color:var(--ttt);padding:9px 8px;display:flex;align
 .day{min-height:96px;padding:5px 4px 3px;border-right:1px solid var(--ol);border-bottom:1px solid var(--ol);cursor:pointer;position:relative;overflow:hidden;transition:background .12s}
 .day:nth-child(7n){border-right:none}
 .day.other{opacity:.28}
-.day.today{background:var(--ck)}
+.day.today{background:var(--cs);box-shadow:inset 0 0 0 2px var(--cs)}
 .day.selected{background:var(--ck);outline:2px solid var(--cs);outline-offset:-2px;z-index:1}
 .day:active{background:var(--ol)}
+.day.today .dn{color:var(--cst)!important}
 .dn{font-size:17px;font-weight:700;line-height:1.2}
 .day.sat .dn{color:var(--bl)}
 .day.sun .dn{color:var(--re)}
@@ -79,16 +80,6 @@ header{background:var(--tbg);color:var(--ttt);padding:9px 8px;display:flex;align
 [data-theme=dark] .sN2{background:#1A0045;color:#CE93D8}
 [data-theme=dark] .sR{background:#2D0045;color:#E1BEE7}
 
-/* ── Detail panel ── */
-.panel{position:fixed;bottom:0;left:0;right:0;background:var(--sf);border-top:2px solid var(--ol);padding:14px 16px 30px;transform:translateY(100%);transition:transform .28s cubic-bezier(.4,0,.2,1);z-index:300;box-shadow:0 -4px 24px rgba(0,0,0,.2)}
-.panel.open{transform:translateY(0)}
-.ph{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
-.pd{font-size:17px;font-weight:700}
-.cbtn{background:none;border:none;color:var(--tx2);font-size:22px;cursor:pointer;line-height:1}
-.cards{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
-.card{background:var(--sh);border-radius:10px;padding:9px 12px}
-.card-l{font-size:12px;color:var(--tx2);margin-bottom:4px}
-.card-v{font-size:16px;font-weight:700}
 
 /* ── Settings modal ── */
 .ov{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:400;display:none;align-items:flex-end;justify-content:center}
@@ -149,11 +140,6 @@ header{background:var(--tbg);color:var(--ttt);padding:9px 8px;display:flex;align
 
 <div class="cal" id="cal"></div>
 
-<div class="panel" id="panel">
-  <div class="ph">
-    <span class="pd" id="panelDate"></span>
-    <button class="cbtn" onclick="closePanel()">✕</button>
-  </div>
   <div class="cards" id="panelCards"></div>
 </div>
 
@@ -636,7 +622,7 @@ function render(){
 
     if(stHtml) html+=`<div class="stags">${stHtml}</div>`;
     div.innerHTML=html;
-    div.onclick=()=>showPanel(date,d,lstr,term,hol,work);
+    
     cal.appendChild(div);
   }
 
@@ -649,35 +635,6 @@ function render(){
   }
 }
 
-// ═══════════════════════════════════════
-//  日期详情面板
-// ═══════════════════════════════════════
-const DOW_CN=['周日','周一','周二','周三','周四','周五','周六'];
-function showPanel(date,d,lstr,term,hol,work){
-  selDate=date; render();
-  document.getElementById('panelDate').textContent=
-    `${date.getFullYear()}年${date.getMonth()+1}月${d}日 ${DOW_CN[date.getDay()]}${work?' [调休上班]':''}`;
-  const cards=document.getElementById('panelCards'); cards.innerHTML='';
-  const rows=[
-    ['农历', lstr||'—'],
-    ['节气', term||'—'],
-    ['节假日', hol||(work?'调休上班':'—')],
-  ];
-  activeGroups.forEach(gi=>{
-    const s=getShift(gi,date);
-    rows.push([`${GROUPS[gi]}班`, SH_NAMES[s]]);
-  });
-  rows.forEach(([l,v])=>{
-    const c=document.createElement('div');c.className='card';
-    c.innerHTML=`<div class="card-l">${l}</div><div class="card-v">${v}</div>`;
-    cards.appendChild(c);
-  });
-  document.getElementById('panel').classList.add('open');
-}
-function closePanel(){
-  document.getElementById('panel').classList.remove('open');
-  selDate=null; render();
-}
 
 // ═══════════════════════════════════════
 //  导航
@@ -693,8 +650,6 @@ function goToday(){
   cy=Math.max(2026,Math.min(2050,today.getFullYear()));
   cm2=today.getMonth()+1;
   render();
-  const d=today.getDate();
-  showPanel(today,d,lunarStr(cy,cm2,d),getTerm(cy,cm2,d),getHol(cy,cm2,d),isWork(cy,cm2,d));
 }
 
 // ═══════════════════════════════════════
@@ -771,10 +726,6 @@ document.getElementById('cal').addEventListener('touchend',e=>{
   const dx=e.changedTouches[0].clientX-tx;
   if(Math.abs(dx)>50) navM(dx<0?1:-1);
 },{passive:true});
-document.addEventListener('click',e=>{
-  const p=document.getElementById('panel');
-  if(p.classList.contains('open')&&!p.contains(e.target)&&!e.target.closest('.day')) closePanel();
-});
 
 // ═══════════════════════════════════════
 //  PWA
