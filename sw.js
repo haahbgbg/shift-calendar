@@ -1,4 +1,4 @@
-const CACHE = 'shift-cal-v1';
+const CACHE = 'shift-cal-v2';
 const FILES = ['./', './index.html'];
 
 self.addEventListener('install', e => {
