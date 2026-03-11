@@ -144,6 +144,66 @@ header{background:var(--tbg);color:var(--ttt);padding:9px 8px;display:flex;align
   <div class="cards" id="panelCards"></div>
 </div>
 
+<!-- 提醒彈窗 -->
+<div class="ov" id="rovl" onclick="rovlClick(event)">
+  <div class="modal">
+    <div class="mh">
+      <span class="mt">🔔 班次提醒</span>
+      <button class="mx" onclick="closeRemind()">✕</button>
+    </div>
+    <div class="mb">
+
+      <div class="sec">
+        <div class="stl">📅 選擇日期</div>
+        <input type="date" class="sel" id="remDate" style="padding:9px 12px" oninput="buildRemCards()">
+      </div>
+
+      <!-- 四班自動班次卡片 -->
+      <div class="sec">
+        <div class="stl">👥 選擇班組</div>
+        <div id="remCards" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>
+      </div>
+
+      <!-- 僅在選中白班/上夜時顯示 -->
+      <div id="remOptions" style="display:none;flex-direction:column;gap:12px">
+        <div class="sec">
+          <div class="stl">⏰ 上班時間與提前量</div>
+          <div class="row">
+            <span class="rl">上班時間</span>
+            <select class="sel" id="remShiftTime" onchange="updateRemPreview()">
+              <option value="06:00">06:00</option>
+              <option value="07:00">07:00</option>
+              <option value="07:30">07:30</option>
+              <option value="08:00">08:00（白班默認）</option>
+              <option value="08:30">08:30</option>
+              <option value="09:00">09:00</option>
+              <option value="18:00">18:00</option>
+              <option value="19:00">19:00</option>
+              <option value="19:30">19:30</option>
+              <option value="20:00">20:00（上夜默認）</option>
+              <option value="20:30">20:30</option>
+              <option value="21:00">21:00</option>
+            </select>
+          </div>
+          <div class="row">
+            <span class="rl">提前提醒</span>
+            <select class="sel" id="remAdvance" onchange="updateRemPreview()">
+              <option value="15">15 分鐘</option>
+              <option value="30" selected>30 分鐘</option>
+              <option value="60">1 小時</option>
+              <option value="120">2 小時</option>
+            </select>
+          </div>
+        </div>
+        <div id="remPreview" style="background:var(--sh);border-radius:10px;padding:10px 14px;font-size:13px;color:var(--tx2)"></div>
+        <button class="apply" onclick="setRemind()">📲 下載至日曆（含提醒）</button>
+      </div>
+
+      <div id="remList" style="display:flex;flex-direction:column;gap:6px"></div>
+    </div>
+  </div>
+</div>
+
 <div class="ov" id="ov" onclick="ovClick(event)">
   <div class="modal">
     <div class="mh">
@@ -207,7 +267,7 @@ function saveS(){
 }
 const S=loadS();
 
-let cy  = Math.max(2026,Math.min(2050,today.getFullYear()));
+let cy  = today.getFullYear();
 let cm2 = today.getMonth()+1;
 let selDate = null;
 
@@ -563,6 +623,8 @@ function renderBar(){
   const sep=document.createElement('div');sep.className='bsep';bar.appendChild(sep);
   const btn=document.createElement('button');btn.className='set-btn';btn.textContent='⚙️ 设置';
   btn.onclick=openModal;bar.appendChild(btn);
+  const rbtn=document.createElement('button');rbtn.className='set-btn';rbtn.textContent='🔔 提醒';
+  rbtn.onclick=openRemind;bar.appendChild(rbtn);
 }
 
 // ═══════════════════════════════════════
@@ -586,17 +648,18 @@ function render(){
 
   // 本月
   for(let d=1;d<=dim;d++){
+    try{
     const date=new Date(cy,cm2-1,d);
     const dow=date.getDay(); // 0=日,6=六
     const isToday=cy===today.getFullYear()&&cm2===today.getMonth()+1&&d===today.getDate();
     const isSel=selDate&&selDate.getTime()===date.getTime();
-    const hol=getHol(cy,cm2,d);
-    const work=isWork(cy,cm2,d);
-    const term=getTerm(cy,cm2,d);
-    const lstr=lunarStr(cy,cm2,d);
+    const hol=getHol(cy,cm2,d)||'';
+    const work=isWork(cy,cm2,d)||false;
+    const term=getTerm(cy,cm2,d)||'';
+    const lstr=lunarStr(cy,cm2,d)||'';
 
     let cls='day';
-    if(work) cls+=' work-day'; // 调休上班，不着色
+    if(work) cls+=' work-day';
     else if(dow===6) cls+=' sat';
     else if(dow===0) cls+=' sun';
     if(isToday) cls+=' today';
@@ -604,14 +667,16 @@ function render(){
 
     // 班次标签
     let stHtml='';
-    if(activeGroups.length>0){
-      activeGroups.forEach(gi=>{
-        const s=getShift(gi,date);
-        if(visibleShifts.includes(s)){
-          stHtml+=`<div class="st s${SH_KEYS[s]}">${GROUPS[gi]}${SH_NAMES[s]}</div>`;
-        }
-      });
-    }
+    try{
+      if(activeGroups.length>0){
+        activeGroups.forEach(gi=>{
+          const s=getShift(gi,date);
+          if(visibleShifts.includes(s)){
+            stHtml+=`<div class="st s${SH_KEYS[s]}">${GROUPS[gi]}${SH_NAMES[s]}</div>`;
+          }
+        });
+      }
+    }catch(e2){ stHtml=''; }
 
     const div=document.createElement('div');div.className=cls;
     let html='';
@@ -623,8 +688,14 @@ function render(){
 
     if(stHtml) html+=`<div class="stags">${stHtml}</div>`;
     div.innerHTML=html;
-    
     cal.appendChild(div);
+    }catch(e){ 
+      // 保底：出錯也顯示日期數字
+      const div=document.createElement('div');
+      div.className='day';
+      div.innerHTML=`<div class="dn">${d}</div>`;
+      cal.appendChild(div);
+    }
   }
 
   // 下月补位
@@ -719,6 +790,249 @@ function applyModal(){
 }
 
 // ═══════════════════════════════════════
+//  提醒功能
+// ═══════════════════════════════════════
+const SH_REMIND = [0, 2]; // 白班=0, 上夜=2（可提醒的班次）
+let remTimers = {}; // {id: timerId}
+
+function loadReminders(){ try{return JSON.parse(localStorage.getItem('sc_rem')||'[]');}catch{return[];} }
+function saveReminders(list){ localStorage.setItem('sc_rem', JSON.stringify(list)); }
+
+const PAD = n=>String(n).padStart(2,'0');
+const DOW_REM = ['周日','周一','周二','周三','周四','周五','周六'];
+let remSelGroup = null; // 當前選中的班組（null=未選）
+
+// 找該班組下一個白班或上夜的日期
+function nextWorkShift(gi, fromDate){
+  const d = new Date(fromDate);
+  for(let i=0;i<8;i++){
+    d.setDate(d.getDate()+1);
+    const s = getShift(gi, d);
+    if(s===0||s===2) return {date:new Date(d), shift:s};
+  }
+  return null;
+}
+
+function openRemind(){
+  if('Notification' in window && Notification.permission==='default') Notification.requestPermission();
+  const now = new Date();
+  document.getElementById('remDate').value =
+    `${now.getFullYear()}-${PAD(now.getMonth()+1)}-${PAD(now.getDate())}`;
+  remSelGroup = null;
+  document.getElementById('remOptions').style.display='none';
+  buildRemCards();
+  renderRemList();
+  document.getElementById('rovl').classList.add('open');
+}
+function closeRemind(){ document.getElementById('rovl').classList.remove('open'); }
+function rovlClick(e){ if(e.target===document.getElementById('rovl'))closeRemind(); }
+
+function buildRemCards(){
+  const dateVal = document.getElementById('remDate').value;
+  const box = document.getElementById('remCards');
+  box.innerHTML='';
+  document.getElementById('remOptions').style.display='none';
+  if(!dateVal) return;
+  const [y,m,d] = dateVal.split('-').map(Number);
+  const date = new Date(y,m-1,d);
+
+  GROUPS.forEach((name,gi)=>{
+    const s = getShift(gi, date);
+    const canRem = s===0||s===2; // 白班或上夜才可設提醒
+    const card = document.createElement('div');
+    const isSelected = remSelGroup===gi;
+
+    // 卡片樣式
+    card.style.cssText=`border-radius:12px;padding:12px;cursor:pointer;border:2px solid ${
+      isSelected ? 'var(--cs)' : 'var(--ol)'};background:${
+      isSelected ? 'var(--ck)' : 'var(--sh)'};transition:all .15s`;
+
+    let body='';
+    if(canRem){
+      // 白班顯示08:00，上夜顯示20:00
+      const t = s===0 ? '08:00' : '20:00';
+      body=`<div style="font-size:16px;font-weight:700">${name}班</div>
+            <div style="font-size:13px;font-weight:600;color:${s===0?'#BF360C':'#311B92'};margin-top:3px">${SH_NAMES[s]}</div>
+            <div style="font-size:12px;color:var(--tx2);margin-top:2px">⏰ ${t} 上班</div>`;
+      card.onclick=()=>{ remSelGroup=gi; buildRemCards(); showRemOptions(gi,s,date); };
+    } else {
+      // 休息或下夜：顯示當日班次，並提示下次需提醒的班次
+      const next = nextWorkShift(gi, date);
+      const nextInfo = next ?
+        `下次${SH_NAMES[next.shift]}：${next.date.getMonth()+1}/${next.date.getDate()}` : '';
+      body=`<div style="font-size:16px;font-weight:700;color:var(--tx2)">${name}班</div>
+            <div style="font-size:13px;font-weight:600;color:var(--tx2);margin-top:3px">${SH_NAMES[s]}</div>
+            <div style="font-size:11px;color:var(--tx2);margin-top:2px;opacity:.7">${nextInfo}</div>`;
+      card.style.opacity='.75';
+      // 點擊跳轉到下次需上班日期
+      if(next){
+        card.onclick=()=>{
+          document.getElementById('remDate').value=
+            `${next.date.getFullYear()}-${PAD(next.date.getMonth()+1)}-${PAD(next.date.getDate())}`;
+          remSelGroup=gi;
+          buildRemCards();
+          showRemOptions(gi, next.shift, next.date);
+        };
+      }
+    }
+    card.innerHTML=body;
+    box.appendChild(card);
+  });
+}
+
+function showRemOptions(gi, s, date){
+  const opts = document.getElementById('remOptions');
+  opts.style.display='flex';
+  // 自動填入上班時間（select）
+  const sel = document.getElementById('remShiftTime');
+  sel.value = s===0 ? '08:00' : '20:00';
+  updateRemPreview();
+}
+
+function updateRemPreview(){
+  const dateVal = document.getElementById('remDate').value;
+  const prev = document.getElementById('remPreview');
+  if(!dateVal||remSelGroup===null){ prev.innerHTML=''; return; }
+  const [y,m,d] = dateVal.split('-').map(Number);
+  const date = new Date(y,m-1,d);
+  const s = getShift(remSelGroup, date);
+  const adv = parseInt(document.getElementById('remAdvance').value);
+  const tVal = document.getElementById('remShiftTime').value;
+  const [sh,sm] = tVal.split(':').map(Number);
+  const remTime = new Date(y,m-1,d,sh,sm-adv);
+  if(remTime <= new Date()){
+    prev.innerHTML=`<span style="color:var(--re)">⚠️ 提醒時間已過，請調整</span>`; return;
+  }
+  prev.innerHTML=`<b>${GROUPS[remSelGroup]}班 ${SH_NAMES[s]}</b> ${y}年${m}月${d}日（${DOW_REM[date.getDay()]}）<br>
+    上班時間 <b>${tVal}</b>，將生成含提前 <b>${adv}分鐘</b> 提醒的日曆事件`;
+}
+
+function padZ(n){ return String(n).padStart(2,'0'); }
+
+function setRemind(){
+  if(remSelGroup===null){ alert('請先選擇班組'); return; }
+  const dateVal = document.getElementById('remDate').value;
+  if(!dateVal){ alert('請選擇日期'); return; }
+  const [y,m,d] = dateVal.split('-').map(Number);
+  const date = new Date(y,m-1,d);
+  const s = getShift(remSelGroup, date);
+  const adv = parseInt(document.getElementById('remAdvance').value);
+  const tVal = document.getElementById('remShiftTime').value;
+  const [sh,sm] = tVal.split(':').map(Number);
+  const startDt = new Date(y,m-1,d,sh,sm);
+  if(startDt <= new Date()){ alert('上班時間已過，請重新選擇'); return; }
+  // 白班08:00-20:00（12小時），上夜20:00-次日08:00（12小時）
+  const endDt = new Date(startDt.getTime() + 12*60*60*1000);
+  const summary = GROUPS[remSelGroup] + '班 ' + SH_NAMES[s];
+  const fmt = dt =>
+    '' + dt.getFullYear() + padZ(dt.getMonth()+1) + padZ(dt.getDate())
+    + 'T' + padZ(dt.getHours()) + padZ(dt.getMinutes()) + '00';
+  const CRLF = '\r\n';
+  const ics = 'BEGIN:VCALENDAR' + CRLF
+    + 'VERSION:2.0' + CRLF
+    + 'PRODID:-//倒班萬年曆//ZH' + CRLF
+    + 'CALSCALE:GREGORIAN' + CRLF
+    + 'METHOD:PUBLISH' + CRLF
+    // 聲明亞洲/上海時區（北京時間 UTC+8）
+    + 'BEGIN:VTIMEZONE' + CRLF
+    + 'TZID:Asia/Shanghai' + CRLF
+    + 'BEGIN:STANDARD' + CRLF
+    + 'TZOFFSETFROM:+0800' + CRLF
+    + 'TZOFFSETTO:+0800' + CRLF
+    + 'TZNAME:CST' + CRLF
+    + 'DTSTART:19700101T000000' + CRLF
+    + 'END:STANDARD' + CRLF
+    + 'END:VTIMEZONE' + CRLF
+    + 'BEGIN:VEVENT' + CRLF
+    + 'UID:shift-' + Date.now() + '@shiftcal' + CRLF
+    + 'DTSTAMP:' + fmt(new Date()) + CRLF
+    // 明確指定時區，避免被當成 UTC
+    + 'DTSTART;TZID=Asia/Shanghai:' + fmt(startDt) + CRLF
+    + 'DTEND;TZID=Asia/Shanghai:' + fmt(endDt) + CRLF
+    + 'SUMMARY:' + summary + CRLF
+    + 'DESCRIPTION:倒班萬年曆：' + summary + '，上班前' + adv + '分鐘提醒' + CRLF
+    + 'BEGIN:VALARM' + CRLF
+    + 'ACTION:AUDIO' + CRLF
+    + 'TRIGGER:-PT' + adv + 'M' + CRLF
+    + 'DESCRIPTION:' + summary + ' 提醒' + CRLF
+    + 'END:VALARM' + CRLF
+    + 'END:VEVENT' + CRLF
+    + 'END:VCALENDAR';
+  const blob = new Blob([ics], {type:'text/calendar;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = GROUPS[remSelGroup] + '班_' + dateVal + '.ics';
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+  document.getElementById('remPreview').innerHTML =
+    '<span style="color:var(--gr)">✓ 已下載！點開 .ics 文件，選擇手機自帶日曆導入，提醒由系統日曆發出。</span>';
+}
+
+function scheduleReminder(rem){
+  const ms = rem.remTime - Date.now();
+  if(ms<=0) return;
+  const payload = {
+    type:'SCHEDULE_NOTIF',
+    id: rem.id,
+    remTime: rem.remTime,
+    title:`⏰ ${GROUPS[rem.group]}班 ${SH_NAMES[rem.shift]}`,
+    body:`${rem.date} 距上班還有 ${rem.adv} 分鐘，請準備出發！`
+  };
+  // 優先用 Service Worker 發通知（後台可靠）
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.ready.then(reg=>{
+      if(reg.active) reg.active.postMessage(payload);
+    });
+  }
+  // 補底：頁面層 timer（頁面在前台時保證觸發）
+  if(remTimers[rem.id]) clearTimeout(remTimers[rem.id]);
+  remTimers[rem.id] = setTimeout(()=>{
+    if(Notification.permission==='granted'){
+      new Notification(payload.title,{
+        body:payload.body,
+        icon:"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='32' fill='%236750A4'/%3E%3Ctext x='96' y='130' text-anchor='middle' font-size='100' fill='white'%3E📅%3C/text%3E%3C/svg%3E",
+        tag:String(rem.id),requireInteraction:true
+      });
+    }
+    saveReminders(loadReminders().filter(r=>r.id!==rem.id));
+    renderRemList();
+  }, ms);
+}
+
+function cancelReminder(id){
+  if(remTimers[id]){ clearTimeout(remTimers[id]); delete remTimers[id]; }
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.ready.then(reg=>{
+      if(reg.active) reg.active.postMessage({type:'CANCEL_NOTIF', id});
+    });
+  }
+  saveReminders(loadReminders().filter(r=>r.id!==id));
+  renderRemList();
+}
+
+function renderRemList(){
+  const el=document.getElementById('remList'); if(!el) return;
+  const list=loadReminders().filter(r=>r.remTime>Date.now());
+  if(list.length===0){ el.innerHTML=''; return; }
+  let html='<div style="font-size:12px;font-weight:700;color:var(--tx2);margin:4px 0 4px">已設提醒</div>';
+  list.forEach(rem=>{
+    const rt=new Date(rem.remTime);
+    html+=`<div style="display:flex;justify-content:space-between;align-items:center;background:var(--sh);border-radius:8px;padding:9px 12px">
+      <div>
+        <div style="font-size:13px;font-weight:700">${GROUPS[rem.group]}班 ${SH_NAMES[rem.shift]}</div>
+        <div style="font-size:12px;color:var(--tx2)">${rem.date} · 提前${rem.adv}分 · ${PAD(rt.getHours())}:${PAD(rt.getMinutes())}提醒</div>
+      </div>
+      <button onclick="cancelReminder(${rem.id})" style="background:var(--re);color:#fff;border:none;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;flex-shrink:0">取消</button>
+    </div>`;
+  });
+  el.innerHTML=html;
+}
+
+// 頁面載入時恢復計時器
+loadReminders().filter(r=>r.remTime>Date.now()).forEach(scheduleReminder);
+
+// ═══════════════════════════════════════
 //  触摸滑动切月
 // ═══════════════════════════════════════
 let tx=0;
@@ -732,13 +1046,10 @@ document.getElementById('cal').addEventListener('touchend',e=>{
 //  PWA
 // ═══════════════════════════════════════
 
-// PWA：注冊真正的 Service Worker
-if('serviceWorker' in navigator){
-  navigator.serviceWorker.register('./sw.js').catch(e=>console.log('SW:',e));
-}
-// Manifest inline
-const mf={name:'倒班万年历',short_name:'倒班历',start_url:'./',scope:'./',display:'standalone',background_color:'#FEFBFF',theme_color:'#6750A4',icons:[{src:"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='32' fill='%236750A4'/%3E%3Ctext x='96' y='130' text-anchor='middle' font-size='100' fill='white'%3E📅%3C/text%3E%3C/svg%3E",sizes:'192x192',type:'image/svg+xml'}]};
+// PWA Manifest（inline，不依賴網絡）
+const mf={name:'倒班万年历',short_name:'倒班历',start_url:'.',display:'standalone',background_color:'#FEFBFF',theme_color:'#6750A4',icons:[{src:"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='32' fill='%236750A4'/%3E%3Ctext x='96' y='130' text-anchor='middle' font-size='100' fill='white'%3E📅%3C/text%3E%3C/svg%3E",sizes:'192x192',type:'image/svg+xml'}]};
 const ml=document.createElement('link');ml.rel='manifest';ml.href=URL.createObjectURL(new Blob([JSON.stringify(mf)],{type:'application/manifest+json'}));document.head.appendChild(ml);
+// 不使用 Service Worker（Blob URL 方式在安裝後無法工作）
 
 // ═══════════════════════════════════════
 //  初始化
