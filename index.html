@@ -196,7 +196,11 @@ header{background:var(--tbg);color:var(--ttt);padding:9px 8px;display:flex;align
           </div>
         </div>
         <div id="remPreview" style="background:var(--sh);border-radius:10px;padding:10px 14px;font-size:13px;color:var(--tx2)"></div>
-        <button class="apply" id="wpushBtn" onclick="setRemind()">🔔 設置推送提醒</button>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <button class="apply" id="wpushBtn" onclick="setRemind('push')" style="font-size:13px">🔔 推送提醒</button>
+        <button class="apply" onclick="setRemind('ics')" style="font-size:13px;background:var(--gr)">📲 下載日曆</button>
+      </div>
+      <div style="font-size:11px;color:var(--tx2);text-align:center;margin-top:4px">推送提醒需 Google 服務（國際版手機）；OPPO/小米/華為請用下載日曆</div>
       </div>
 
       <div id="remList" style="display:flex;flex-direction:column;gap:6px"></div>
@@ -909,7 +913,7 @@ function updateRemPreview(){
 
 function padZ(n){ return String(n).padStart(2,'0'); }
 
-function setRemind(){
+function setRemind(mode){
   if(remSelGroup===null){ alert('請先選擇班組'); return; }
   const dateVal = document.getElementById('remDate').value;
   if(!dateVal){ alert('請選擇日期'); return; }
@@ -925,18 +929,52 @@ function setRemind(){
   if(remTime <= Date.now()){ alert('提醒時間已過，請重新設置'); return; }
   const title = '⏰ ' + GROUPS[remSelGroup] + '班 ' + SH_NAMES[s];
   const body  = dateVal + ' 距上班還有 ' + adv + ' 分鐘，請準備出發！';
+
+  // ICS 下載模式
+  if(mode === 'ics'){
+    const fmt = dt => '' + dt.getFullYear() + padZ(dt.getMonth()+1) + padZ(dt.getDate())
+      + 'T' + padZ(dt.getHours()) + padZ(dt.getMinutes()) + '00';
+    const endDt = new Date(startDt.getTime() + 12*60*60*1000);
+    const summary = GROUPS[remSelGroup] + '班 ' + SH_NAMES[s];
+    const CRLF = '\r\n';
+    const ics = 'BEGIN:VCALENDAR' + CRLF + 'VERSION:2.0' + CRLF
+      + 'PRODID:-//倒班萬年曆//ZH' + CRLF + 'CALSCALE:GREGORIAN' + CRLF + 'METHOD:PUBLISH' + CRLF
+      + 'BEGIN:VTIMEZONE' + CRLF + 'TZID:Asia/Shanghai' + CRLF + 'BEGIN:STANDARD' + CRLF
+      + 'TZOFFSETFROM:+0800' + CRLF + 'TZOFFSETTO:+0800' + CRLF + 'TZNAME:CST' + CRLF
+      + 'DTSTART:19700101T000000' + CRLF + 'END:STANDARD' + CRLF + 'END:VTIMEZONE' + CRLF
+      + 'BEGIN:VEVENT' + CRLF + 'UID:shift-' + Date.now() + '@shiftcal' + CRLF
+      + 'DTSTAMP:' + fmt(new Date()) + CRLF
+      + 'DTSTART;TZID=Asia/Shanghai:' + fmt(startDt) + CRLF
+      + 'DTEND;TZID=Asia/Shanghai:' + fmt(endDt) + CRLF
+      + 'SUMMARY:' + summary + CRLF
+      + 'DESCRIPTION:倒班萬年曆：' + summary + '，上班前' + adv + '分鐘提醒' + CRLF
+      + 'BEGIN:VALARM' + CRLF + 'ACTION:AUDIO' + CRLF + 'TRIGGER:-PT' + adv + 'M' + CRLF
+      + 'DESCRIPTION:' + summary + ' 提醒' + CRLF + 'END:VALARM' + CRLF
+      + 'END:VEVENT' + CRLF + 'END:VCALENDAR';
+    const blob = new Blob([ics], {type:'text/calendar;charset=utf-8'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = GROUPS[remSelGroup] + '班_' + dateVal + '.ics';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+    document.getElementById('remPreview').innerHTML =
+      '<span style="color:var(--gr)">✓ 已下載！點開 .ics 文件導入手機日曆，提醒由系統日曆發出。</span>';
+    return;
+  }
+
+  // Web Push 模式
   const btn = document.getElementById('wpushBtn');
   btn.disabled = true; btn.textContent = '訂閱中…';
   subscribeAndSend({ id: Date.now(), remTime, title, body, group: remSelGroup, shift: s, date: dateVal, adv })
     .then(()=>{
       document.getElementById('remPreview').innerHTML =
         '<span style="color:var(--gr)">✅ 提醒已設置！關閉瀏覽器後仍會收到通知。</span>';
-      btn.textContent = '🔔 設置推送提醒'; btn.disabled = false;
+      btn.textContent = '🔔 推送提醒'; btn.disabled = false;
     })
     .catch(err=>{
       document.getElementById('remPreview').innerHTML =
-        '<span style="color:var(--re)">❌ 失敗：' + err.message + '</span>';
-      btn.textContent = '🔔 設置推送提醒'; btn.disabled = false;
+        '<span style="color:var(--re)">❌ 失敗：' + err.message + '（國內手機請改用📲下載日曆）</span>';
+      btn.textContent = '🔔 推送提醒'; btn.disabled = false;
     });
 }
 
@@ -968,7 +1006,28 @@ async function getOrSubscribe() {
   return sub;
 }
 
+// 判斷是否在原生 App 內（有 NativePush 橋接）
+function isNativeApp() {
+  return typeof window.NativePush !== 'undefined' && window.NativePush.isNativeApp();
+}
+
 async function subscribeAndSend(reminder) {
+  // 在原生 App 內：直接用系統 AlarmManager，無需網絡
+  if (isNativeApp()) {
+    window.NativePush.scheduleReminder(JSON.stringify({
+      id: reminder.id,
+      remTime: reminder.remTime,
+      title: reminder.title,
+      body: reminder.body
+    }));
+    const list = loadReminders();
+    list.push(reminder);
+    saveReminders(list);
+    renderRemList();
+    return;
+  }
+  // 網頁版：走 Cloudflare Worker Web Push
+
   const sub = await getOrSubscribe();
   const res = await fetch(PUSH_SERVER + '/remind', {
     method: 'POST',
@@ -1016,7 +1075,9 @@ function scheduleReminder(rem){
 
 function cancelReminder(id){
   if(remTimers[id]){ clearTimeout(remTimers[id]); delete remTimers[id]; }
-  // 通知服務器刪除排程
+  // 原生 App：取消本地鬧鐘
+  if (isNativeApp()) { window.NativePush.cancelReminder(id); return; }
+  // 網頁版：通知服務器刪除排程
   fetch(PUSH_SERVER + '/remind/' + id, { method: 'DELETE' }).catch(()=>{});
   saveReminders(loadReminders().filter(r=>r.id!==id));
   renderRemList();
