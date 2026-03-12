@@ -196,7 +196,7 @@ header{background:var(--tbg);color:var(--ttt);padding:9px 8px;display:flex;align
           </div>
         </div>
         <div id="remPreview" style="background:var(--sh);border-radius:10px;padding:10px 14px;font-size:13px;color:var(--tx2)"></div>
-        <button class="apply" onclick="setRemind()">📲 下載至日曆（含提醒）</button>
+        <button class="apply" id="wpushBtn" onclick="setRemind()">🔔 設置推送提醒</button>
       </div>
 
       <div id="remList" style="display:flex;flex-direction:column;gap:6px"></div>
@@ -921,52 +921,66 @@ function setRemind(){
   const [sh,sm] = tVal.split(':').map(Number);
   const startDt = new Date(y,m-1,d,sh,sm);
   if(startDt <= new Date()){ alert('上班時間已過，請重新選擇'); return; }
-  // 白班08:00-20:00（12小時），上夜20:00-次日08:00（12小時）
-  const endDt = new Date(startDt.getTime() + 12*60*60*1000);
-  const summary = GROUPS[remSelGroup] + '班 ' + SH_NAMES[s];
-  const fmt = dt =>
-    '' + dt.getFullYear() + padZ(dt.getMonth()+1) + padZ(dt.getDate())
-    + 'T' + padZ(dt.getHours()) + padZ(dt.getMinutes()) + '00';
-  const CRLF = '\r\n';
-  const ics = 'BEGIN:VCALENDAR' + CRLF
-    + 'VERSION:2.0' + CRLF
-    + 'PRODID:-//倒班萬年曆//ZH' + CRLF
-    + 'CALSCALE:GREGORIAN' + CRLF
-    + 'METHOD:PUBLISH' + CRLF
-    // 聲明亞洲/上海時區（北京時間 UTC+8）
-    + 'BEGIN:VTIMEZONE' + CRLF
-    + 'TZID:Asia/Shanghai' + CRLF
-    + 'BEGIN:STANDARD' + CRLF
-    + 'TZOFFSETFROM:+0800' + CRLF
-    + 'TZOFFSETTO:+0800' + CRLF
-    + 'TZNAME:CST' + CRLF
-    + 'DTSTART:19700101T000000' + CRLF
-    + 'END:STANDARD' + CRLF
-    + 'END:VTIMEZONE' + CRLF
-    + 'BEGIN:VEVENT' + CRLF
-    + 'UID:shift-' + Date.now() + '@shiftcal' + CRLF
-    + 'DTSTAMP:' + fmt(new Date()) + CRLF
-    // 明確指定時區，避免被當成 UTC
-    + 'DTSTART;TZID=Asia/Shanghai:' + fmt(startDt) + CRLF
-    + 'DTEND;TZID=Asia/Shanghai:' + fmt(endDt) + CRLF
-    + 'SUMMARY:' + summary + CRLF
-    + 'DESCRIPTION:倒班萬年曆：' + summary + '，上班前' + adv + '分鐘提醒' + CRLF
-    + 'BEGIN:VALARM' + CRLF
-    + 'ACTION:AUDIO' + CRLF
-    + 'TRIGGER:-PT' + adv + 'M' + CRLF
-    + 'DESCRIPTION:' + summary + ' 提醒' + CRLF
-    + 'END:VALARM' + CRLF
-    + 'END:VEVENT' + CRLF
-    + 'END:VCALENDAR';
-  const blob = new Blob([ics], {type:'text/calendar;charset=utf-8'});
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = GROUPS[remSelGroup] + '班_' + dateVal + '.ics';
-  document.body.appendChild(a); a.click();
-  document.body.removeChild(a);
-  setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
-  document.getElementById('remPreview').innerHTML =
-    '<span style="color:var(--gr)">✓ 已下載！點開 .ics 文件，選擇手機自帶日曆導入，提醒由系統日曆發出。</span>';
+  const remTime = startDt.getTime() - adv*60000;
+  if(remTime <= Date.now()){ alert('提醒時間已過，請重新設置'); return; }
+  const title = '⏰ ' + GROUPS[remSelGroup] + '班 ' + SH_NAMES[s];
+  const body  = dateVal + ' 距上班還有 ' + adv + ' 分鐘，請準備出發！';
+  const btn = document.getElementById('wpushBtn');
+  btn.disabled = true; btn.textContent = '訂閱中…';
+  subscribeAndSend({ id: Date.now(), remTime, title, body, group: remSelGroup, shift: s, date: dateVal, adv })
+    .then(()=>{
+      document.getElementById('remPreview').innerHTML =
+        '<span style="color:var(--gr)">✅ 提醒已設置！關閉瀏覽器後仍會收到通知。</span>';
+      btn.textContent = '🔔 設置推送提醒'; btn.disabled = false;
+    })
+    .catch(err=>{
+      document.getElementById('remPreview').innerHTML =
+        '<span style="color:var(--re)">❌ 失敗：' + err.message + '</span>';
+      btn.textContent = '🔔 設置推送提醒'; btn.disabled = false;
+    });
+}
+
+
+// ══════════════════════════════════════
+//  Web Push 核心（填入你的 Worker 網址）
+// ══════════════════════════════════════
+const PUSH_SERVER  = 'https://shift-cal-push.haah-jovi.workers.dev';
+const VAPID_PUBLIC = 'BL5N9u0-F2Ib7HSclXQywWl9ZyXuVqPN8t9aWDSuM-MXyezWx4t3ypues4mU_gfXoEu7HkaO8-M5Acdnms4-bB0';
+
+function urlB64ToUint8Array(b64) {
+  const s = (b64 + '==='.slice((b64.length + 3) % 4)).replace(/-/g,'+').replace(/_/g,'/');
+  return Uint8Array.from(atob(s), c => c.charCodeAt(0));
+}
+
+async function getOrSubscribe() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    throw new Error('此瀏覽器不支持 Web Push，請使用 Chrome / Edge');
+  }
+  const reg = await navigator.serviceWorker.ready;
+  let sub = await reg.pushManager.getSubscription();
+  if (sub) return sub;
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') throw new Error('請允許通知權限後再試');
+  sub = await reg.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: urlB64ToUint8Array(VAPID_PUBLIC)
+  });
+  return sub;
+}
+
+async function subscribeAndSend(reminder) {
+  const sub = await getOrSubscribe();
+  const res = await fetch(PUSH_SERVER + '/remind', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ subscription: sub.toJSON(), reminder })
+  });
+  if (!res.ok) throw new Error('服務器錯誤 ' + res.status);
+  // 同時保存到本地，方便顯示列表和取消
+  const list = loadReminders();
+  list.push({ ...reminder, id: reminder.id });
+  saveReminders(list);
+  renderRemList();
 }
 
 function scheduleReminder(rem){
@@ -1002,11 +1016,8 @@ function scheduleReminder(rem){
 
 function cancelReminder(id){
   if(remTimers[id]){ clearTimeout(remTimers[id]); delete remTimers[id]; }
-  if('serviceWorker' in navigator){
-    navigator.serviceWorker.ready.then(reg=>{
-      if(reg.active) reg.active.postMessage({type:'CANCEL_NOTIF', id});
-    });
-  }
+  // 通知服務器刪除排程
+  fetch(PUSH_SERVER + '/remind/' + id, { method: 'DELETE' }).catch(()=>{});
   saveReminders(loadReminders().filter(r=>r.id!==id));
   renderRemList();
 }
@@ -1049,7 +1060,10 @@ document.getElementById('cal').addEventListener('touchend',e=>{
 // PWA Manifest（inline，不依賴網絡）
 const mf={name:'倒班万年历',short_name:'倒班历',start_url:'.',display:'standalone',background_color:'#FEFBFF',theme_color:'#6750A4',icons:[{src:"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='32' fill='%236750A4'/%3E%3Ctext x='96' y='130' text-anchor='middle' font-size='100' fill='white'%3E📅%3C/text%3E%3C/svg%3E",sizes:'192x192',type:'image/svg+xml'}]};
 const ml=document.createElement('link');ml.rel='manifest';ml.href=URL.createObjectURL(new Blob([JSON.stringify(mf)],{type:'application/manifest+json'}));document.head.appendChild(ml);
-// 不使用 Service Worker（Blob URL 方式在安裝後無法工作）
+// 注冊 Service Worker（Web Push 必須）
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('./sw.js').catch(e=>console.warn('SW:', e));
+}
 
 // ═══════════════════════════════════════
 //  初始化
