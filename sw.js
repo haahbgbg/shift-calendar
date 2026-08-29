@@ -1,4 +1,4 @@
-const CACHE = 'shiftcal-v5';
+const CACHE = 'shiftcal-v6';
 self.addEventListener('install', e => {
   self.skipWaiting();
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(['./'])));
